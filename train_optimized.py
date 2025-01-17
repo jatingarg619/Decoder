@@ -7,6 +7,7 @@ from torch.nn import functional as F
 from dataclasses import dataclass
 from torch.nn.parallel import DistributedDataParallel as DDP
 import numpy as np
+from datetime import datetime
 
 # Hyperparameters
 learning_rate = 3e-4  # Peak learning rate
@@ -171,12 +172,22 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
     return min_lr + coeff * (learning_rate - min_lr)
 
+def log_to_markdown(message, filename='training_log.md'):
+    """Append a log message to the markdown file with timestamp"""
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with open(filename, 'a') as f:
+        f.write(f"### {timestamp}\n{message}\n\n")
+
 def main():
     torch.manual_seed(1337)
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}")
+    
+    # Initialize logging
+    log_to_markdown("## Training Started")
+    log_to_markdown(f"- Device: {device}")
     
     # Load the data
     with open('input.txt', 'r') as f:
@@ -194,14 +205,22 @@ def main():
     # Initialize the model
     model = GPT(GPTConfig(vocab_size=vocab_size))
     model = model.to(device)
-    print(f"Model parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
+    num_params = sum(p.numel() for p in model.parameters())/1e6
+    print(f"Model parameters: {num_params:.2f}M")
+    log_to_markdown(f"- Model Parameters: {num_params:.2f}M")
+    log_to_markdown(f"- Vocabulary Size: {vocab_size}")
+    log_to_markdown(f"- Training Data Size: {len(train_data)}")
+    log_to_markdown(f"- Validation Data Size: {len(val_data)}")
     
     # Initialize optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, betas=(beta1, beta2), weight_decay=weight_decay)
+    log_to_markdown("### Hyperparameters:")
+    log_to_markdown(f"```\nLearning Rate: {learning_rate}\nBatch Size: {batch_size}\nBlock Size: {block_size}\nWeight Decay: {weight_decay}\nBetas: ({beta1}, {beta2})\n```")
     
     # Training loop
     best_val_loss = float('inf')
     iter_num = 0
+    start_time = time.time()
     
     while True:
         # Get batch and learning rate
@@ -221,6 +240,7 @@ def main():
         # Logging
         if iter_num % log_interval == 0:
             print(f"iter {iter_num}: loss {loss.item():.4f}, lr {lr:e}")
+            log_to_markdown(f"- Iteration {iter_num}: Training Loss = {loss.item():.4f}, Learning Rate = {lr:e}")
             
         # Evaluation
         if iter_num % eval_interval == 0:
@@ -235,14 +255,22 @@ def main():
             val_loss = losses.mean()
             model.train()
             print(f"step {iter_num}: val loss {val_loss:.4f}")
+            log_to_markdown(f"- Validation Loss = {val_loss:.6f}")
+            
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
+                log_to_markdown(f"- New Best Validation Loss = {best_val_loss:.6f}")
                 if best_val_loss < 0.099999:
+                    elapsed = time.time() - start_time
+                    log_to_markdown(f"## Training Completed")
+                    log_to_markdown(f"- Final Loss: {best_val_loss:.6f}")
+                    log_to_markdown(f"- Time Elapsed: {elapsed/3600:.2f} hours")
                     print(f"Achieved target loss of {best_val_loss:.6f}")
                     break
                     
         iter_num += 1
         if iter_num > lr_decay_iters:
+            log_to_markdown("## Training Stopped - Max Iterations Reached")
             break
 
 if __name__ == '__main__':
