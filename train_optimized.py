@@ -176,8 +176,20 @@ def get_lr(it):
 def log_to_markdown(message, filename='training_log.md'):
     """Append a log message to the markdown file with timestamp"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    with open(filename, 'a') as f:
-        f.write(f"### {timestamp}\n{message}\n\n")
+    log_dir = os.path.dirname(os.path.abspath(__file__))
+    log_path = os.path.join(log_dir, filename)
+    
+    # Create the file with headers if it doesn't exist
+    if not os.path.exists(log_path):
+        with open(log_path, 'w') as f:
+            f.write("# Training Log\n\n")
+    
+    # Append the message
+    try:
+        with open(log_path, 'a') as f:
+            f.write(f"### {timestamp}\n{message}\n\n")
+    except Exception as e:
+        print(f"Error writing to log file: {e}")
 
 def main():
     torch.manual_seed(1337)
