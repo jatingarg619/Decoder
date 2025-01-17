@@ -13,18 +13,19 @@ from datetime import datetime
 learning_rate = 3e-4  # Standard transformer learning rate
 min_lr = 3e-5
 warmup_iters = 100
-lr_decay_iters = 2500
+lr_decay_iters = 5000  # Extended training time
 weight_decay = 0.1
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0
 decay_lr = True
 batch_size = 128
-block_size = 256  # Increased context
+block_size = 256
 eval_interval = 100
 eval_iters = 50
 log_interval = 10
 gradient_accumulation_steps = 4
+target_loss = 0.099999  # Target loss threshold
 
 # Model architecture
 @dataclass
@@ -227,6 +228,7 @@ def main():
     log_to_markdown(f"- Vocabulary Size: {vocab_size}")
     log_to_markdown(f"- Training Data Size: {len(train_data)}")
     log_to_markdown(f"- Validation Data Size: {len(val_data)}")
+    log_to_markdown(f"- Target Loss: {target_loss}")
     
     # Initialize optimizer with larger eps for stability
     optimizer = torch.optim.AdamW(
@@ -261,7 +263,12 @@ def main():
             accumulated_loss += loss.item() * gradient_accumulation_steps
             loss.backward()
         
-        # Update learning rate
+        # Update learning rate with cosine restart if needed
+        if iter_num > lr_decay_iters:
+            iter_num = 0  # Reset iteration count for learning rate schedule
+            start_time = time.time()  # Reset time for new cycle
+            log_to_markdown("## Learning Rate Schedule Restarted")
+        
         lr = get_lr(iter_num) if decay_lr else learning_rate
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
@@ -293,18 +300,15 @@ def main():
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 log_to_markdown(f"- New Best Validation Loss = {best_val_loss:.6f}")
-                if best_val_loss < 0.099999:
+                if best_val_loss < target_loss:
                     elapsed = time.time() - start_time
                     log_to_markdown(f"## Training Completed")
                     log_to_markdown(f"- Final Loss: {best_val_loss:.6f}")
                     log_to_markdown(f"- Time Elapsed: {elapsed/3600:.2f} hours")
                     print(f"Achieved target loss of {best_val_loss:.6f}")
                     break
-                    
+        
         iter_num += 1
-        if iter_num > lr_decay_iters:
-            log_to_markdown("## Training Stopped - Max Iterations Reached")
-            break
 
 if __name__ == '__main__':
     main() 
