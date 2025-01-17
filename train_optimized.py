@@ -10,21 +10,21 @@ import numpy as np
 from datetime import datetime
 
 # Hyperparameters
-learning_rate = 1e-3  # Higher learning rate
-min_lr = 1e-4  # Higher minimum learning rate
+learning_rate = 3e-4  # Standard transformer learning rate
+min_lr = 3e-5
 warmup_iters = 100
-lr_decay_iters = 2000  # Train longer
-weight_decay = 0.1  # Reduced weight decay
+lr_decay_iters = 2500
+weight_decay = 0.1
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0
 decay_lr = True
-batch_size = 256  # Larger batch size
-block_size = 128  # Larger context
+batch_size = 128
+block_size = 256  # Increased context
 eval_interval = 100
 eval_iters = 50
 log_interval = 10
-gradient_accumulation_steps = 2
+gradient_accumulation_steps = 4
 
 # Model architecture
 @dataclass
@@ -32,15 +32,16 @@ class GPTConfig:
     block_size: int = block_size
     vocab_size: int = 50304
     n_layer: int = 12
-    n_head: int = 12  # Reduced from 16
-    n_embd: int = 768  # Reduced from 1024
-    dropout: float = 0.2  # Reduced dropout
+    n_head: int = 16
+    n_embd: int = 1024  # Increased embedding dimension
+    dropout: float = 0.1
     bias: bool = True
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
         assert config.n_embd % config.n_head == 0
+        # Scale up attention heads
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         self.attn_dropout = nn.Dropout(config.dropout)
@@ -57,7 +58,8 @@ class CausalSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        # Use flash attention for faster training
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=self.dropout if self.training else 0.0)
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         y = self.resid_dropout(self.c_proj(y))
         return y
@@ -65,6 +67,7 @@ class CausalSelfAttention(nn.Module):
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
+        # Wider MLP layers
         self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
         self.gelu = nn.GELU()
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
