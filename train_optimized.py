@@ -10,20 +10,21 @@ import numpy as np
 from datetime import datetime
 
 # Hyperparameters
-learning_rate = 3e-4  # Peak learning rate
-min_lr = 3e-5  # Minimum learning rate at the end of training
-warmup_iters = 2000  # Linear warmup over warmup_iters
-lr_decay_iters = 800000  # Cosine decay over lr_decay_iters
-weight_decay = 0.1  # AdamW weight decay
-beta1 = 0.9  # AdamW beta1
-beta2 = 0.95  # AdamW beta2
-grad_clip = 1.0  # Clip gradients at this value
-decay_lr = True  # Whether to decay learning rate
-batch_size = 64  # Training batch size
-block_size = 256  # Maximum sequence length
-eval_interval = 500  # How often to evaluate
-eval_iters = 200  # Number of iterations to use for evaluation
-log_interval = 10  # How often to print training progress
+learning_rate = 1e-3  # Increased learning rate
+min_lr = 1e-4  # Increased minimum learning rate
+warmup_iters = 100  # Reduced warmup iterations
+lr_decay_iters = 2000  # Reduced decay iterations
+weight_decay = 0.1
+beta1 = 0.9
+beta2 = 0.95
+grad_clip = 1.0
+decay_lr = True
+batch_size = 256  # Increased batch size
+block_size = 128  # Reduced sequence length for faster iterations
+eval_interval = 100  # More frequent evaluation
+eval_iters = 50  # Reduced eval iterations
+log_interval = 10
+gradient_accumulation_steps = 4  # Added gradient accumulation
 
 # Model architecture
 @dataclass
@@ -33,8 +34,8 @@ class GPTConfig:
     n_layer: int = 12
     n_head: int = 16
     n_embd: int = 1024
-    dropout: float = 0.1
-    bias: bool = False
+    dropout: float = 0.2  # Increased dropout
+    bias: bool = True  # Added bias terms
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
@@ -212,10 +213,17 @@ def main():
     log_to_markdown(f"- Training Data Size: {len(train_data)}")
     log_to_markdown(f"- Validation Data Size: {len(val_data)}")
     
-    # Initialize optimizer
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, betas=(beta1, beta2), weight_decay=weight_decay)
+    # Initialize optimizer with larger eps for stability
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=learning_rate,
+        betas=(beta1, beta2),
+        weight_decay=weight_decay,
+        eps=1e-5
+    )
+    
     log_to_markdown("### Hyperparameters:")
-    log_to_markdown(f"```\nLearning Rate: {learning_rate}\nBatch Size: {batch_size}\nBlock Size: {block_size}\nWeight Decay: {weight_decay}\nBetas: ({beta1}, {beta2})\n```")
+    log_to_markdown(f"```\nLearning Rate: {learning_rate}\nBatch Size: {batch_size}\nBlock Size: {block_size}\nWeight Decay: {weight_decay}\nBetas: ({beta1}, {beta2})\nGradient Accumulation Steps: {gradient_accumulation_steps}\n```")
     
     # Training loop
     best_val_loss = float('inf')
@@ -223,24 +231,34 @@ def main():
     start_time = time.time()
     
     while True:
-        # Get batch and learning rate
-        xb, yb = get_batch(train_data, block_size, batch_size)
-        xb, yb = xb.to(device), yb.to(device)
+        # Accumulate gradients over multiple forward passes
+        optimizer.zero_grad(set_to_none=True)
+        accumulated_loss = 0
+        
+        for _ in range(gradient_accumulation_steps):
+            # Get batch and learning rate
+            xb, yb = get_batch(train_data, block_size, batch_size // gradient_accumulation_steps)
+            xb, yb = xb.to(device), yb.to(device)
+            
+            # Forward pass
+            logits, loss = model(xb, yb)
+            loss = loss / gradient_accumulation_steps  # Scale loss
+            accumulated_loss += loss.item() * gradient_accumulation_steps
+            loss.backward()
+        
+        # Update learning rate
         lr = get_lr(iter_num) if decay_lr else learning_rate
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
             
-        # Forward pass
-        logits, loss = model(xb, yb)
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
+        # Gradient clipping and optimizer step
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
         
         # Logging
         if iter_num % log_interval == 0:
-            print(f"iter {iter_num}: loss {loss.item():.4f}, lr {lr:e}")
-            log_to_markdown(f"- Iteration {iter_num}: Training Loss = {loss.item():.4f}, Learning Rate = {lr:e}")
+            print(f"iter {iter_num}: loss {accumulated_loss:.4f}, lr {lr:e}")
+            log_to_markdown(f"- Iteration {iter_num}: Training Loss = {accumulated_loss:.4f}, Learning Rate = {lr:e}")
             
         # Evaluation
         if iter_num % eval_interval == 0:
