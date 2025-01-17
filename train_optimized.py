@@ -10,21 +10,21 @@ import numpy as np
 from datetime import datetime
 
 # Hyperparameters
-learning_rate = 1e-3  # Increased learning rate
-min_lr = 1e-4  # Increased minimum learning rate
-warmup_iters = 100  # Reduced warmup iterations
-lr_decay_iters = 2000  # Reduced decay iterations
-weight_decay = 0.1
+learning_rate = 6e-4  # Moderate learning rate
+min_lr = 6e-5  # Minimum learning rate
+warmup_iters = 100  # Quick warmup
+lr_decay_iters = 1000  # Shorter training
+weight_decay = 0.2  # Increased weight decay for better regularization
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0
 decay_lr = True
-batch_size = 256  # Increased batch size
-block_size = 128  # Reduced sequence length for faster iterations
-eval_interval = 100  # More frequent evaluation
-eval_iters = 50  # Reduced eval iterations
+batch_size = 128  # Reduced batch size
+block_size = 64  # Shorter sequences
+eval_interval = 50  # More frequent evaluation
+eval_iters = 50
 log_interval = 10
-gradient_accumulation_steps = 4  # Added gradient accumulation
+gradient_accumulation_steps = 2  # Reduced accumulation steps
 
 # Model architecture
 @dataclass
@@ -34,8 +34,8 @@ class GPTConfig:
     n_layer: int = 12
     n_head: int = 16
     n_embd: int = 1024
-    dropout: float = 0.2  # Increased dropout
-    bias: bool = True  # Added bias terms
+    dropout: float = 0.3  # Increased dropout
+    bias: bool = True
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
