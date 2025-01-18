@@ -7,6 +7,7 @@ from torch.nn import functional as F
 from dataclasses import dataclass
 from torch.nn.parallel import DistributedDataParallel as DDP
 import numpy as np
+from datetime import datetime
 
 # Hyperparameters
 learning_rate = 3e-4  # Peak learning rate
@@ -171,6 +172,16 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
     return min_lr + coeff * (learning_rate - min_lr)
 
+def save_training_log(log_entry, filename='training_logs.md'):
+    """Save training logs in markdown format"""
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with open(filename, 'a') as f:
+        if not f.tell():  # If file is empty, write header
+            f.write('# Training Logs\n\n')
+            f.write('| Timestamp | Iteration | Training Loss | Learning Rate | Validation Loss |\n')
+            f.write('|-----------|------------|---------------|---------------|----------------|\n')
+        f.write(f'| {timestamp} | {log_entry["iter"]:10d} | {log_entry["train_loss"]:.6f} | {log_entry["lr"]:.2e} | {log_entry.get("val_loss", "-"):14.6f} |\n')
+
 def main():
     torch.manual_seed(1337)
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -221,6 +232,11 @@ def main():
         # Logging
         if iter_num % log_interval == 0:
             print(f"iter {iter_num}: loss {loss.item():.4f}, lr {lr:e}")
+            save_training_log({
+                "iter": iter_num,
+                "train_loss": loss.item(),
+                "lr": lr
+            })
             
         # Evaluation
         if iter_num % eval_interval == 0:
@@ -235,6 +251,12 @@ def main():
             val_loss = losses.mean()
             model.train()
             print(f"step {iter_num}: val loss {val_loss:.4f}")
+            save_training_log({
+                "iter": iter_num,
+                "train_loss": loss.item(),
+                "lr": lr,
+                "val_loss": val_loss
+            })
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 if best_val_loss < 0.099999:
