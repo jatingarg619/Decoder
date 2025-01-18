@@ -2,6 +2,10 @@ import os
 import torch
 from huggingface_hub import HfApi, create_repo, upload_file
 from train_optimized import GPT, GPTConfig  # Import your model architecture
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 def upload_to_hub(
     checkpoint_path="checkpoints/latest_model.pt",
@@ -109,9 +113,8 @@ This model was trained on Shakespeare's text with a target loss of < 0.099999.
         raise
 
 if __name__ == "__main__":
-    # You can either set HF_TOKEN environment variable or pass it directly
+    # Use token from environment variable
     upload_to_hub(
         checkpoint_path="checkpoints/latest_model.pt",
-        repo_name="jatingocodeo/shakespeare-decoder",  # Updated repository name
-        token="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"  # Your HF token
+        repo_name="jatingocodeo/shakespeare-decoder"
     ) 

@@ -1,6 +1,9 @@
 # Project specific
 CodeFiles/
 
+# Environment variables
+.env
+
 # Python
 __pycache__/
 *.py[cod]
