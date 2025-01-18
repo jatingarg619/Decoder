@@ -7,25 +7,22 @@ from torch.nn import functional as F
 from dataclasses import dataclass
 from torch.nn.parallel import DistributedDataParallel as DDP
 import numpy as np
-from datetime import datetime
 
 # Hyperparameters
-learning_rate = 3e-4  # Standard transformer learning rate
-min_lr = 3e-5
-warmup_iters = 100
-lr_decay_iters = 5000  # Extended training time
-weight_decay = 0.1
-beta1 = 0.9
-beta2 = 0.95
-grad_clip = 1.0
-decay_lr = True
-batch_size = 128
-block_size = 256
-eval_interval = 100
-eval_iters = 50
-log_interval = 10
-gradient_accumulation_steps = 4
-target_loss = 0.099999  # Target loss threshold
+learning_rate = 3e-4  # Peak learning rate
+min_lr = 3e-5  # Minimum learning rate at the end of training
+warmup_iters = 2000  # Linear warmup over warmup_iters
+lr_decay_iters = 800000  # Cosine decay over lr_decay_iters
+weight_decay = 0.1  # AdamW weight decay
+beta1 = 0.9  # AdamW beta1
+beta2 = 0.95  # AdamW beta2
+grad_clip = 1.0  # Clip gradients at this value
+decay_lr = True  # Whether to decay learning rate
+batch_size = 64  # Training batch size
+block_size = 256  # Maximum sequence length
+eval_interval = 500  # How often to evaluate
+eval_iters = 200  # Number of iterations to use for evaluation
+log_interval = 10  # How often to print training progress
 
 # Model architecture
 @dataclass
@@ -34,15 +31,14 @@ class GPTConfig:
     vocab_size: int = 50304
     n_layer: int = 12
     n_head: int = 16
-    n_embd: int = 1024  # Increased embedding dimension
+    n_embd: int = 1024
     dropout: float = 0.1
-    bias: bool = True
+    bias: bool = False
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
         assert config.n_embd % config.n_head == 0
-        # Scale up attention heads
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         self.attn_dropout = nn.Dropout(config.dropout)
@@ -59,8 +55,7 @@ class CausalSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         
-        # Use flash attention for faster training
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=self.dropout if self.training else 0.0)
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         y = self.resid_dropout(self.c_proj(y))
         return y
@@ -68,7 +63,6 @@ class CausalSelfAttention(nn.Module):
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
-        # Wider MLP layers
         self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
         self.gelu = nn.GELU()
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
@@ -177,34 +171,12 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
     return min_lr + coeff * (learning_rate - min_lr)
 
-def log_to_markdown(message, filename='training_log.md'):
-    """Append a log message to the markdown file with timestamp"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    log_dir = os.path.dirname(os.path.abspath(__file__))
-    log_path = os.path.join(log_dir, filename)
-    
-    # Create the file with headers if it doesn't exist
-    if not os.path.exists(log_path):
-        with open(log_path, 'w') as f:
-            f.write("# Training Log\n\n")
-    
-    # Append the message
-    try:
-        with open(log_path, 'a') as f:
-            f.write(f"### {timestamp}\n{message}\n\n")
-    except Exception as e:
-        print(f"Error writing to log file: {e}")
-
 def main():
     torch.manual_seed(1337)
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}")
-    
-    # Initialize logging
-    log_to_markdown("## Training Started")
-    log_to_markdown(f"- Device: {device}")
     
     # Load the data
     with open('input.txt', 'r') as f:
@@ -222,65 +194,33 @@ def main():
     # Initialize the model
     model = GPT(GPTConfig(vocab_size=vocab_size))
     model = model.to(device)
-    num_params = sum(p.numel() for p in model.parameters())/1e6
-    print(f"Model parameters: {num_params:.2f}M")
-    log_to_markdown(f"- Model Parameters: {num_params:.2f}M")
-    log_to_markdown(f"- Vocabulary Size: {vocab_size}")
-    log_to_markdown(f"- Training Data Size: {len(train_data)}")
-    log_to_markdown(f"- Validation Data Size: {len(val_data)}")
-    log_to_markdown(f"- Target Loss: {target_loss}")
+    print(f"Model parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
     
-    # Initialize optimizer with larger eps for stability
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=learning_rate,
-        betas=(beta1, beta2),
-        weight_decay=weight_decay,
-        eps=1e-5
-    )
-    
-    log_to_markdown("### Hyperparameters:")
-    log_to_markdown(f"```\nLearning Rate: {learning_rate}\nBatch Size: {batch_size}\nBlock Size: {block_size}\nWeight Decay: {weight_decay}\nBetas: ({beta1}, {beta2})\nGradient Accumulation Steps: {gradient_accumulation_steps}\n```")
+    # Initialize optimizer
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, betas=(beta1, beta2), weight_decay=weight_decay)
     
     # Training loop
     best_val_loss = float('inf')
     iter_num = 0
-    start_time = time.time()
     
     while True:
-        # Accumulate gradients over multiple forward passes
-        optimizer.zero_grad(set_to_none=True)
-        accumulated_loss = 0
-        
-        for _ in range(gradient_accumulation_steps):
-            # Get batch and learning rate
-            xb, yb = get_batch(train_data, block_size, batch_size // gradient_accumulation_steps)
-            xb, yb = xb.to(device), yb.to(device)
-            
-            # Forward pass
-            logits, loss = model(xb, yb)
-            loss = loss / gradient_accumulation_steps  # Scale loss
-            accumulated_loss += loss.item() * gradient_accumulation_steps
-            loss.backward()
-        
-        # Update learning rate with cosine restart if needed
-        if iter_num > lr_decay_iters:
-            iter_num = 0  # Reset iteration count for learning rate schedule
-            start_time = time.time()  # Reset time for new cycle
-            log_to_markdown("## Learning Rate Schedule Restarted")
-        
+        # Get batch and learning rate
+        xb, yb = get_batch(train_data, block_size, batch_size)
+        xb, yb = xb.to(device), yb.to(device)
         lr = get_lr(iter_num) if decay_lr else learning_rate
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
             
-        # Gradient clipping and optimizer step
+        # Forward pass
+        logits, loss = model(xb, yb)
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
         
         # Logging
         if iter_num % log_interval == 0:
-            print(f"iter {iter_num}: loss {accumulated_loss:.4f}, lr {lr:e}")
-            log_to_markdown(f"- Iteration {iter_num}: Training Loss = {accumulated_loss:.4f}, Learning Rate = {lr:e}")
+            print(f"iter {iter_num}: loss {loss.item():.4f}, lr {lr:e}")
             
         # Evaluation
         if iter_num % eval_interval == 0:
@@ -295,20 +235,15 @@ def main():
             val_loss = losses.mean()
             model.train()
             print(f"step {iter_num}: val loss {val_loss:.4f}")
-            log_to_markdown(f"- Validation Loss = {val_loss:.6f}")
-            
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
-                log_to_markdown(f"- New Best Validation Loss = {best_val_loss:.6f}")
-                if best_val_loss < target_loss:
-                    elapsed = time.time() - start_time
-                    log_to_markdown(f"## Training Completed")
-                    log_to_markdown(f"- Final Loss: {best_val_loss:.6f}")
-                    log_to_markdown(f"- Time Elapsed: {elapsed/3600:.2f} hours")
+                if best_val_loss < 0.099999:
                     print(f"Achieved target loss of {best_val_loss:.6f}")
                     break
-        
+                    
         iter_num += 1
+        if iter_num > lr_decay_iters:
+            break
 
 if __name__ == '__main__':
     main() 
