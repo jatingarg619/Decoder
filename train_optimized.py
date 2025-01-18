@@ -178,13 +178,9 @@ def save_training_log(log_entry, filename='training_logs.md'):
     with open(filename, 'a') as f:
         if not f.tell():  # If file is empty, write header
             f.write('# Training Logs\n\n')
-            f.write('| Timestamp | Iteration | Training Loss | Learning Rate | Validation Loss |\n')
-            f.write('|-----------|------------|---------------|---------------|----------------|\n')
-        
-        # Format validation loss only if it exists
-        val_loss_str = f'{log_entry["val_loss"]:.6f}' if "val_loss" in log_entry else "-"
-        
-        f.write(f'| {timestamp} | {log_entry["iter"]:10d} | {log_entry["train_loss"]:.6f} | {log_entry["lr"]:.2e} | {val_loss_str:>14} |\n')
+            f.write('| Timestamp | Iteration | Training Loss | Learning Rate |\n')
+            f.write('|-----------|------------|---------------|---------------|\n')
+        f.write(f'| {timestamp} | {log_entry["iter"]:10d} | {log_entry["train_loss"]:.6f} | {log_entry["lr"]:.2e} |\n')
 
 def save_model(model, optimizer, iter_num, loss, filename):
     """Save model checkpoint"""
@@ -228,7 +224,7 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, betas=(beta1, beta2), weight_decay=weight_decay)
     
     # Training loop
-    best_val_loss = float('inf')
+    best_train_loss = float('inf')
     iter_num = 0
     
     while True:
@@ -246,44 +242,25 @@ def main():
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
         
-        # Logging
+        # Logging and model saving
         if iter_num % log_interval == 0:
-            print(f"iter {iter_num}: loss {loss.item():.4f}, lr {lr:e}")
+            train_loss = loss.item()
+            print(f"iter {iter_num}: loss {train_loss:.4f}, lr {lr:e}")
             save_training_log({
                 "iter": iter_num,
-                "train_loss": loss.item(),
+                "train_loss": train_loss,
                 "lr": lr
             })
             
-        # Evaluation
-        if iter_num % eval_interval == 0:
-            losses = torch.zeros(eval_iters)
-            model.eval()
-            with torch.no_grad():
-                for k in range(eval_iters):
-                    xb, yb = get_batch(val_data, block_size, batch_size)
-                    xb, yb = xb.to(device), yb.to(device)
-                    logits, loss = model(xb, yb)
-                    losses[k] = loss.item()
-            val_loss = losses.mean()
-            model.train()
-            print(f"step {iter_num}: val loss {val_loss:.4f}")
-            save_training_log({
-                "iter": iter_num,
-                "train_loss": loss.item(),
-                "lr": lr,
-                "val_loss": val_loss
-            })
-            
-            # Save best model
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                print(f"Saving best model with val loss: {best_val_loss:.6f}")
+            # Save best model based on training loss
+            if train_loss < best_train_loss:
+                best_train_loss = train_loss
+                print(f"Saving best model with training loss: {best_train_loss:.6f}")
                 save_model(
                     model, 
                     optimizer, 
                     iter_num, 
-                    best_val_loss, 
+                    best_train_loss, 
                     os.path.join('checkpoints', f'best_model.pt')
                 )
                 
@@ -292,12 +269,12 @@ def main():
                     model,
                     optimizer,
                     iter_num,
-                    best_val_loss,
+                    best_train_loss,
                     os.path.join('checkpoints', f'checkpoint_{iter_num:06d}.pt')
                 )
                 
-                if best_val_loss < 0.099999:
-                    print(f"Achieved target loss of {best_val_loss:.6f}")
+                if best_train_loss < 0.099999:
+                    print(f"Achieved target loss of {best_train_loss:.6f}")
                     break
                     
         iter_num += 1
