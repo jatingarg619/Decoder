@@ -186,12 +186,25 @@ def save_training_log(log_entry, filename='training_logs.md'):
         
         f.write(f'| {timestamp} | {log_entry["iter"]:10d} | {log_entry["train_loss"]:.6f} | {log_entry["lr"]:.2e} | {val_loss_str:>14} |\n')
 
+def save_model(model, optimizer, iter_num, loss, filename):
+    """Save model checkpoint"""
+    checkpoint = {
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'iter_num': iter_num,
+        'loss': loss,
+    }
+    torch.save(checkpoint, filename)
+
 def main():
     torch.manual_seed(1337)
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}")
+    
+    # Create checkpoint directory
+    os.makedirs('checkpoints', exist_ok=True)
     
     # Load the data
     with open('input.txt', 'r') as f:
@@ -261,8 +274,28 @@ def main():
                 "lr": lr,
                 "val_loss": val_loss
             })
+            
+            # Save best model
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
+                print(f"Saving best model with val loss: {best_val_loss:.6f}")
+                save_model(
+                    model, 
+                    optimizer, 
+                    iter_num, 
+                    best_val_loss, 
+                    os.path.join('checkpoints', f'best_model.pt')
+                )
+                
+                # Also save a numbered checkpoint for backup
+                save_model(
+                    model,
+                    optimizer,
+                    iter_num,
+                    best_val_loss,
+                    os.path.join('checkpoints', f'checkpoint_{iter_num:06d}.pt')
+                )
+                
                 if best_val_loss < 0.099999:
                     print(f"Achieved target loss of {best_val_loss:.6f}")
                     break
