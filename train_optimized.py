@@ -180,7 +180,11 @@ def save_training_log(log_entry, filename='training_logs.md'):
             f.write('# Training Logs\n\n')
             f.write('| Timestamp | Iteration | Training Loss | Learning Rate | Validation Loss |\n')
             f.write('|-----------|------------|---------------|---------------|----------------|\n')
-        f.write(f'| {timestamp} | {log_entry["iter"]:10d} | {log_entry["train_loss"]:.6f} | {log_entry["lr"]:.2e} | {log_entry.get("val_loss", "-"):14.6f} |\n')
+        
+        # Format validation loss only if it exists
+        val_loss_str = f'{log_entry["val_loss"]:.6f}' if "val_loss" in log_entry else "-"
+        
+        f.write(f'| {timestamp} | {log_entry["iter"]:10d} | {log_entry["train_loss"]:.6f} | {log_entry["lr"]:.2e} | {val_loss_str:>14} |\n')
 
 def main():
     torch.manual_seed(1337)
