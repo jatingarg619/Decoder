@@ -116,5 +116,5 @@ if __name__ == "__main__":
     # Use token from environment variable
     upload_to_hub(
         checkpoint_path="checkpoints/latest_model.pt",
-        repo_name="jatingocodeo/shakespeare-decoder"
+        repo_name="jatingocodeo/shakespeare-decoder"  # Replace with your repository name
     ) 
