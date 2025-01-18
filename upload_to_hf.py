@@ -89,8 +89,14 @@ This model was trained on Shakespeare's text with a target loss of < 0.099999.
         files_to_upload = [
             "pytorch_model.bin",
             "config.json",
-            "README.md"
+            "README.md",
+            "input.txt"
         ]
+        
+        # Copy input.txt to current directory if it's in CodeFiles
+        if not os.path.exists("input.txt") and os.path.exists("CodeFiles/input.txt"):
+            import shutil
+            shutil.copy2("CodeFiles/input.txt", "input.txt")
         
         for file in files_to_upload:
             print(f"Uploading {file}...")
