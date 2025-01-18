@@ -183,14 +183,34 @@ def save_training_log(log_entry, filename='training_logs.md'):
         f.write(f'| {timestamp} | {log_entry["iter"]:10d} | {log_entry["train_loss"]:.6f} | {log_entry["lr"]:.2e} |\n')
 
 def save_model(model, optimizer, iter_num, loss, filename):
-    """Save model checkpoint"""
-    checkpoint = {
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'iter_num': iter_num,
-        'loss': loss,
-    }
-    torch.save(checkpoint, filename)
+    """Save model checkpoint with error handling"""
+    try:
+        # First save to a temporary file
+        tmp_filename = filename + '.tmp'
+        checkpoint = {
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'iter_num': iter_num,
+            'loss': loss,
+        }
+        
+        # Use torch.save with zip compression
+        torch.save(checkpoint, tmp_filename, _use_new_zipfile_serialization=True)
+        
+        # If save was successful, rename tmp file to final filename
+        if os.path.exists(filename):
+            os.remove(filename)  # Remove old file if it exists
+        os.rename(tmp_filename, filename)
+        return True
+    except Exception as e:
+        print(f"Error saving model to {filename}: {str(e)}")
+        # Clean up temp file if it exists
+        if os.path.exists(tmp_filename):
+            try:
+                os.remove(tmp_filename)
+            except:
+                pass
+        return False
 
 def main():
     torch.manual_seed(1337)
@@ -252,25 +272,18 @@ def main():
                 "lr": lr
             })
             
-            # Save best model based on training loss
+            # Save model if loss improved
             if train_loss < best_train_loss:
                 best_train_loss = train_loss
-                print(f"Saving best model with training loss: {best_train_loss:.6f}")
+                print(f"Saving model with training loss: {best_train_loss:.6f}")
+                
+                # Save the latest model
                 save_model(
                     model, 
                     optimizer, 
                     iter_num, 
                     best_train_loss, 
-                    os.path.join('checkpoints', f'best_model.pt')
-                )
-                
-                # Also save a numbered checkpoint for backup
-                save_model(
-                    model,
-                    optimizer,
-                    iter_num,
-                    best_train_loss,
-                    os.path.join('checkpoints', f'checkpoint_{iter_num:06d}.pt')
+                    os.path.join('checkpoints', 'latest_model.pt')
                 )
                 
                 if best_train_loss < 0.099999:
